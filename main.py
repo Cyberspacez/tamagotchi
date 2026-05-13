@@ -1,4 +1,5 @@
 import pygame
+from pet import Pet
 
 # Window settings
 SCALE = 4
@@ -8,6 +9,7 @@ WIDTH, HEIGHT = 128 * SCALE, 64 * SCALE
 # Animation settings
 FPS = 10
 FRAME_DELAY = 3
+TICK_EVERY = 50  # game ticks before pet ages (50 = 5 seconds)
 
 # Sprite settings
 FRAME_COUNT = 4
@@ -28,11 +30,35 @@ def load_frames(path, frame_count, frame_width, frame_height):
         frames.append(frame)
     return frames
 
+def draw_bar(screen, x, y, value, max_value, color, width=80, height=8):
+    # background bar
+    pygame.draw.rect(screen, (80, 80, 80), (x, y, width, height))
+    # filled bar
+    fill = int((value / max_value) * width)
+    pygame.draw.rect(screen, color, (x, y, fill, height))
+
+def draw_stats(screen, pet, font):
+    # hunger bar (red)
+    label = font.render("H", True, (50, 50, 50))
+    screen.blit(label, (10, 10))
+    draw_bar(screen, 25, 12, pet.hunger, 10, (220, 80, 80))
+
+    # happiness bar (yellow)
+    label = font.render("J", True, (50, 50, 50))
+    screen.blit(label, (10, 26))
+    draw_bar(screen, 25, 28, pet.happiness, 10, (220, 200, 80))
+
+    # health bar (green)
+    label = font.render("L", True, (50, 50, 50))
+    screen.blit(label, (10, 42))
+    draw_bar(screen, 25, 44, pet.health, 10, (80, 180, 80))
+
 def main():
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("Tamagotchi")
     clock = pygame.time.Clock()
+    font = pygame.font.SysFont("Arial", 10)
 
     frames = load_frames(
         "sprites/idle.png",
@@ -41,28 +67,51 @@ def main():
         FRAME_HEIGHT
     )
 
+    pet = Pet("Knight")
     current_frame = 0
     tick = 0
-    running = True
+    pet_tick = 0
 
+    running = True
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_f:
+                    pet.feed()
+                if event.key == pygame.K_p:
+                    pet.play()
 
+        # animation
         tick += 1
         if tick >= FRAME_DELAY:
             tick = 0
             current_frame = (current_frame + 1) % len(frames)
 
+        # pet aging
+        pet_tick += 1
+        if pet_tick >= TICK_EVERY:
+            pet_tick = 0
+            pet.tick()
+
         screen.fill((184, 224, 160))
 
+        # draw stats
+        draw_stats(screen, pet, font)
+
+        # draw knight
         sprite_width = FRAME_WIDTH * SPRITE_SCALE
         sprite_height = FRAME_HEIGHT * SPRITE_SCALE
         x = WIDTH // 2 - sprite_width // 2
         y = HEIGHT // 2 - sprite_height // 2
-
         screen.blit(frames[current_frame], (x, y))
+
+        # dead screen
+        if not pet.alive:
+            dead_text = font.render("Your knight has died!", True, (180, 0, 0))
+            screen.blit(dead_text, (WIDTH // 2 - 50, HEIGHT // 2))
+
         pygame.display.flip()
         clock.tick(FPS)
 
