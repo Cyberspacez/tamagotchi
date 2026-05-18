@@ -1,5 +1,6 @@
 import pygame
 from pet import Pet
+from save import save_pet, load_pet
 
 # Window settings
 SCALE = 4
@@ -68,6 +69,7 @@ def main():
     )
 
     pet = Pet("Knight")
+    load_pet(pet)
     current_frame = 0
     tick = 0
     pet_tick = 0
@@ -114,7 +116,8 @@ def main():
 
         pygame.display.flip()
         clock.tick(FPS)
-
+    
+    save_pet(pet)
     pygame.quit()
 
 if __name__ == "__main__":
