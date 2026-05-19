@@ -1,3 +1,6 @@
+import os
+import threading
+import requests
 import pygame
 from pet import Pet
 from save import save_pet, load_pet
@@ -18,6 +21,8 @@ SPRITE_SCALE = 4
 FRAME_COUNT = 4
 FRAME_WIDTH = 16
 FRAME_HEIGHT = 24
+
+SERVER = "http://localhost:5000"
 
 def load_frames(path, frame_count, frame_width, frame_height):
     sheet = pygame.image.load(path).convert_alpha()
@@ -70,6 +75,19 @@ def get_animation(pet, animations):
         return animations["stand"]
     return animations["idle"]
 
+def push_state(pet):
+    try:
+        requests.post(f"{SERVER}/push", json=pet.status(), timeout=1)
+    except:
+        pass
+
+def check_outside():
+    try:
+        r = requests.get(f"{SERVER}/is_outside", timeout=1)
+        return r.json().get("outside", False)
+    except:
+        return False
+
 def main():
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -90,6 +108,7 @@ def main():
     current_frame = 0
     tick = 0
     pet_tick = 0
+    server_tick = 0
 
     running = True
     while running:
@@ -108,32 +127,44 @@ def main():
         tick += 1
         if tick >= FRAME_DELAY:
             tick = 0
-            frames = get_animation(pet, animations)
-            current_frame = (current_frame + 1) % len(frames)
+            current_frame = (current_frame + 1) % FRAME_COUNT
 
         pet_tick += 1
         if pet_tick >= TICK_EVERY:
             pet_tick = 0
             pet.tick()
 
-        # dark overlay when sleeping
-        if pet.sleeping:
-            screen.fill((80, 100, 80))
+        # push state to server every 30 ticks
+        server_tick += 1
+        if server_tick >= 30:
+            server_tick = 0
+            push_state(pet)
+
+        # check if knight is outside
+        outside = check_outside()
+
+        if outside:
+            screen.fill((30, 30, 30))
+            msg = font.render("Your knight is outside...", True, (200, 200, 200))
+            screen.blit(msg, (WIDTH // 2 - 80, HEIGHT // 2))
         else:
-            screen.fill((184, 224, 160))
+            if pet.sleeping:
+                screen.fill((80, 100, 80))
+            else:
+                screen.fill((184, 224, 160))
 
-        draw_stats(screen, pet, font)
+            draw_stats(screen, pet, font)
 
-        frames = get_animation(pet, animations)
-        sprite_width = FRAME_WIDTH * SPRITE_SCALE
-        sprite_height = FRAME_HEIGHT * SPRITE_SCALE
-        x = WIDTH // 2 - sprite_width // 2
-        y = HEIGHT // 2 - sprite_height // 2
-        screen.blit(frames[current_frame], (x, y))
+            frames = get_animation(pet, animations)
+            sprite_width = FRAME_WIDTH * SPRITE_SCALE
+            sprite_height = FRAME_HEIGHT * SPRITE_SCALE
+            x = WIDTH // 2 - sprite_width // 2
+            y = HEIGHT // 2 - sprite_height // 2
+            screen.blit(frames[current_frame], (x, y))
 
-        if not pet.alive:
-            dead_text = font.render("Your knight has died!", True, (180, 0, 0))
-            screen.blit(dead_text, (WIDTH // 2 - 50, HEIGHT // 2))
+            if not pet.alive:
+                dead_text = font.render("Your knight has died!", True, (180, 0, 0))
+                screen.blit(dead_text, (WIDTH // 2 - 50, HEIGHT // 2))
 
         pygame.display.flip()
         clock.tick(FPS)
