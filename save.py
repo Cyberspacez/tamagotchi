@@ -10,14 +10,16 @@ def save_pet(pet):
         "happiness": pet.happiness,
         "health": pet.health,
         "age": pet.age,
-        "alive": pet.alive
+        "alive": pet.alive,
+        "sleeping": pet.sleeping,
+        "tiredness": pet.tiredness
     }
     with open(SAVE_FILE, "w") as f:
         json.dump(data, f)
 
 def load_pet(pet):
     if not os.path.exists(SAVE_FILE):
-        return  # no save file yet, use defaults
+        return
     with open(SAVE_FILE, "r") as f:
         data = json.load(f)
     pet.name = data["name"]
@@ -26,3 +28,5 @@ def load_pet(pet):
     pet.health = data["health"]
     pet.age = data["age"]
     pet.alive = data["alive"]
+    pet.sleeping = data.get("sleeping", False)
+    pet.tiredness = data.get("tiredness", 0)

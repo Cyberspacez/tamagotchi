@@ -1,1 +1,1 @@
-{"name": "Knight", "hunger": 9, "happiness": 9, "health": 10, "age": 10, "alive": true}
+{"name": "Knight", "hunger": 0, "happiness": 0, "health": 0, "age": 32, "alive": false, "sleeping": false, "tiredness": 10}

@@ -3,7 +3,6 @@ from pet import Pet
 from save import save_pet, load_pet
 from display import USE_PI, init_display
 
-# --- init display first before pygame ---
 init_display()
 
 if USE_PI:
@@ -11,12 +10,10 @@ if USE_PI:
 else:
     WIDTH, HEIGHT = 400, 300
 
-# Animation settings
 FPS = 10
 FRAME_DELAY = 3
 TICK_EVERY = 50
 
-# Sprite settings
 SPRITE_SCALE = 4
 FRAME_COUNT = 4
 FRAME_WIDTH = 16
@@ -55,8 +52,23 @@ def draw_stats(screen, pet, font):
     screen.blit(label, (10, 42))
     draw_bar(screen, 25, 44, pet.health, 10, (80, 180, 80))
 
-    hint = font.render("F=feed  P=play", True, (50, 80, 50))
-    screen.blit(hint, (10, HEIGHT - 20))
+    if pet.sleeping:
+        zzz = font.render("zzz...", True, (100, 100, 180))
+        screen.blit(zzz, (10, 60))
+    else:
+        hint = font.render("F=feed P=play S=sleep", True, (50, 80, 50))
+        screen.blit(hint, (10, HEIGHT - 20))
+
+def get_animation(pet, animations):
+    if not pet.alive:
+        return animations["die"]
+    if pet.sleeping:
+        return animations["stand"]
+    if pet.health < 3:
+        return animations["hurt"]
+    if pet.health < 6:
+        return animations["stand"]
+    return animations["idle"]
 
 def main():
     pygame.init()
@@ -65,12 +77,12 @@ def main():
     clock = pygame.time.Clock()
     font = pygame.font.SysFont("Arial", 10)
 
-    frames = load_frames(
-        "sprites/idle.png",
-        FRAME_COUNT,
-        FRAME_WIDTH,
-        FRAME_HEIGHT
-    )
+    animations = {
+        "idle":  load_frames("sprites/idle.png",  FRAME_COUNT, FRAME_WIDTH, FRAME_HEIGHT),
+        "stand": load_frames("sprites/stand.png", FRAME_COUNT, FRAME_WIDTH, FRAME_HEIGHT),
+        "hurt":  load_frames("sprites/hurt.png",  FRAME_COUNT, FRAME_WIDTH, FRAME_HEIGHT),
+        "die":   load_frames("sprites/die.png",   FRAME_COUNT, FRAME_WIDTH, FRAME_HEIGHT),
+    }
 
     pet = Pet("Knight")
     load_pet(pet)
@@ -85,14 +97,18 @@ def main():
             if event.type == pygame.QUIT:
                 running = False
             if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_f:
-                    pet.feed()
-                if event.key == pygame.K_p:
-                    pet.play()
+                if not pet.sleeping:
+                    if event.key == pygame.K_f:
+                        pet.feed()
+                    if event.key == pygame.K_p:
+                        pet.play()
+                if event.key == pygame.K_s:
+                    pet.toggle_sleep()
 
         tick += 1
         if tick >= FRAME_DELAY:
             tick = 0
+            frames = get_animation(pet, animations)
             current_frame = (current_frame + 1) % len(frames)
 
         pet_tick += 1
@@ -100,15 +116,19 @@ def main():
             pet_tick = 0
             pet.tick()
 
-        screen.fill((184, 224, 160))
+        # dark overlay when sleeping
+        if pet.sleeping:
+            screen.fill((80, 100, 80))
+        else:
+            screen.fill((184, 224, 160))
 
         draw_stats(screen, pet, font)
 
+        frames = get_animation(pet, animations)
         sprite_width = FRAME_WIDTH * SPRITE_SCALE
         sprite_height = FRAME_HEIGHT * SPRITE_SCALE
         x = WIDTH // 2 - sprite_width // 2
         y = HEIGHT // 2 - sprite_height // 2
-
         screen.blit(frames[current_frame], (x, y))
 
         if not pet.alive:
