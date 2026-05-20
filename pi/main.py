@@ -1,120 +1,205 @@
-"""
-Raspberry Pi tamagotchi client.
-Set SERVER_URL to your PC's local IP, e.g. http://192.168.1.50:5000
-If you run this on the same PC as the server, http://localhost:5000 works.
-"""
-import os, time, json, sys
+import os, time, sys
 import requests
+import pygame
 
 SERVER_URL = os.environ.get("TAMAGOTCHI_SERVER_URL", "http://localhost:5000")
 
-# --- Try pygame for display, gpiozero for buttons. Both optional. ---
-try:
-    import pygame
-    HAS_PYGAME = True
-except Exception:
-    HAS_PYGAME = False
-
+# --- GPIO (Pi only) ---
 try:
     from gpiozero import Button
-    BTN_FEED = Button(17)
-    BTN_PLAY = Button(22)
-    BTN_SLEEP = Button(27)
+    BTN_FEED  = Button(17, pull_up=True, bounce_time=0.05)
+    BTN_PLAY  = Button(22, pull_up=True, bounce_time=0.05)
+    BTN_SLEEP = Button(27, pull_up=True, bounce_time=0.05)
     HAS_GPIO = True
 except Exception:
     HAS_GPIO = False
-    BTN_FEED = BTN_PLAY = BTN_SLEEP = None
 
-state = {
-    "hunger": 50, "happiness": 50, "health": 100, "tiredness": 30,
-    "animation": "idle",
-}
+# --- sprite config ---
+SPRITE_DIR = os.path.join(os.path.dirname(__file__), "..", "static", "sprites")
+FRAME_W  = 16
+FRAME_H  = 24
+SCALE    = 6
+KW = FRAME_W * SCALE
+KH = FRAME_H * SCALE
 
-def push():
+ANIM_FRAMES = { "idle": 4, "run": 4, "jump": 6, "hurt": 4, "die": 4, "attack": 5 }
+ANIM_FILES  = { "idle": "idle.png", "stand": "stand.png", "hurt": "hurt.png", "die": "die.png" }
+
+def load_sprites():
+    sheets = {}
+    for name, fname in ANIM_FILES.items():
+        path = os.path.join(SPRITE_DIR, fname)
+        if not os.path.exists(path):
+            print(f"missing sprite: {path}")
+            continue
+        sheet = pygame.image.load(path).convert_alpha()
+        frames = []
+        count = ANIM_FRAMES.get(name, 4)
+        fw = sheet.get_width() // count
+        fh = sheet.get_height()
+        for i in range(count):
+            frame = sheet.subsurface((i * fw, 0, fw, fh))
+            frame = pygame.transform.scale(frame, (KW, KH))
+            frames.append(frame)
+        sheets[name] = frames
+    return sheets
+
+def pick_anim(state):
+    if state["health"] <= 0:      return "die"
+    if state["health"] < 25:      return "hurt"
+    if state["tiredness"] > 80:   return "stand"
+    return "idle"
+
+# --- server ---
+def push(state):
     try:
-        requests.post(f"{SERVER_URL}/api/public/push", json=state, timeout=2)
-    except Exception as e:
-        print("push fail:", e)
-
-def is_outside():
-    try:
-        r = requests.get(f"{SERVER_URL}/api/public/is_outside", timeout=2).json()
-        return bool(r.get("outside")), int(r.get("food_pending", 0))
-    except Exception:
-        return False, 0
-
-def consume_pending_food():
-    try:
-        requests.post(f"{SERVER_URL}/api/public/consume_food", timeout=2)
-    except Exception:
+        requests.post(f"{SERVER_URL}/api/public/push", json=state, timeout=1)
+    except:
         pass
 
-def tick():
-    state["hunger"] = min(100, state["hunger"] + 0.5)
-    state["happiness"] = max(0, state["happiness"] - 0.3)
-    state["tiredness"] = min(100, state["tiredness"] + 0.4)
-    if state["hunger"] > 80 or state["tiredness"] > 90:
-        state["health"] = max(0, state["health"] - 0.2)
+def get_outside():
+    try:
+        r = requests.get(f"{SERVER_URL}/api/public/is_outside", timeout=1).json()
+        return bool(r.get("outside")), int(r.get("food_pending", 0))
+    except:
+        return False, 0
 
-def feed():
-    state["hunger"] = max(0, state["hunger"] - 25)
-    state["animation"] = "eat"
+def consume_food():
+    try:
+        requests.post(f"{SERVER_URL}/api/public/consume_food", timeout=1)
+    except:
+        pass
 
-def play():
+# --- stat actions ---
+def feed(state):
+    state["hunger"]    = min(100, state["hunger"] + 25)
+    state["animation"] = "idle"
+
+def play(state):
     state["happiness"] = min(100, state["happiness"] + 20)
     state["tiredness"] = min(100, state["tiredness"] + 10)
-    state["animation"] = "happy"
+    state["animation"] = "idle"
 
-def sleep_action():
+def sleep_action(state):
     state["tiredness"] = max(0, state["tiredness"] - 40)
-    state["animation"] = "sleep"
+    state["health"]    = min(100, state["health"] + 5)
+    state["animation"] = "stand"
+
+def draw_bar(screen, x, y, value, color, label, font):
+    pygame.draw.rect(screen, (0, 0, 0), (x, y, 104, 10))
+    pygame.draw.rect(screen, color, (x + 1, y + 1, int(value), 8))
+    screen.blit(font.render(label, True, (155, 188, 15)), (x - 16, y - 1))
 
 def main():
-    print(f"Connecting to {SERVER_URL}")
-    if HAS_PYGAME:
-        pygame.init()
-        screen = pygame.display.set_mode((320, 240))
-        pygame.display.set_caption("Knight Tamagotchi")
-        font = pygame.font.SysFont("monospace", 14)
-        big = pygame.font.SysFont("monospace", 40)
-    last_push = 0
+    pygame.init()
+    screen = pygame.display.set_mode((320, 240))
+    pygame.display.set_caption("Knight Tamagotchi")
+    clock  = pygame.time.Clock()
+    font   = pygame.font.SysFont("monospace", 12)
+    big    = pygame.font.SysFont("monospace", 28)
+
+    sprites = load_sprites()
+
+    state = {
+        "hunger": 80, "happiness": 80, "health": 100,
+        "tiredness": 20, "animation": "idle",
+    }
+
+    frame_idx   = 0
+    frame_timer = 0
+    tick_timer  = 0
+    push_timer  = 0
+    poll_timer  = 0
+    outside     = False
+    food_pending = 0
+
+    # GPIO button callbacks
+    if HAS_GPIO:
+        BTN_FEED.when_pressed  = lambda: feed(state)
+        BTN_PLAY.when_pressed  = lambda: play(state)
+        BTN_SLEEP.when_pressed = lambda: sleep_action(state)
+
     running = True
     while running:
-        if HAS_PYGAME:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT: running = False
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_f: feed()
-                    if event.key == pygame.K_p: play()
-                    if event.key == pygame.K_s: sleep_action()
-        if HAS_GPIO:
-            if BTN_FEED.is_pressed: feed()
-            if BTN_PLAY.is_pressed: play()
-            if BTN_SLEEP.is_pressed: sleep_action()
+        dt = clock.tick(30) / 1000.0  # seconds since last frame
 
-        tick()
-        outside, pending = is_outside()
-        if pending > 0 and not outside:
-            consume_pending_food()
-            state["hunger"] = max(0, state["hunger"] - pending * 10)
+        # --- events ---
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_f:      feed(state)
+                if event.key == pygame.K_p:      play(state)
+                if event.key == pygame.K_s:      sleep_action(state)
+                if event.key == pygame.K_ESCAPE: running = False
 
-        if time.time() - last_push > 2:
-            push(); last_push = time.time()
+        # --- stat tick every 60 seconds ---
+        tick_timer += dt
+        if tick_timer >= 60:
+            tick_timer = 0
+            state["hunger"]    = max(0, state["hunger"]    - 2)
+            state["happiness"] = max(0, state["happiness"] - 1)
+            state["tiredness"] = min(100, state["tiredness"] + 2)
+            if state["hunger"] < 20 or state["tiredness"] > 90:
+                state["health"] = max(0, state["health"] - 3)
+            elif state["hunger"] > 60 and state["tiredness"] < 60:
+                state["health"] = min(100, state["health"] + 1)
 
-        if HAS_PYGAME:
-            screen.fill((15, 56, 15))
-            if outside:
-                screen.blit(big.render("OUTSIDE", True, (155,188,15)), (60, 90))
-            else:
-                screen.blit(big.render("KNIGHT", True, (155,188,15)), (70, 20))
-                y = 90
-                for k in ["hunger","happiness","health","tiredness"]:
-                    screen.blit(font.render(f"{k}: {int(state[k])}", True, (155,188,15)), (20, y))
-                    y += 24
-            pygame.display.flip()
-        time.sleep(0.1)
+        # --- push to server every 10s ---
+        push_timer += dt
+        if push_timer >= 10:
+            push_timer = 0
+            state["animation"] = pick_anim(state)
+            push(state)
 
-if HAS_PYGAME: pygame.quit()
+        # --- poll outside every 3s ---
+        poll_timer += dt
+        if poll_timer >= 3:
+            poll_timer = 0
+            outside, food_pending = get_outside()
+            if food_pending > 0 and not outside:
+                state["hunger"] = min(100, state["hunger"] + food_pending * 10)
+                consume_food()
+
+        # --- animation ---
+        anim = pick_anim(state)
+        frames = sprites.get(anim) or sprites.get("idle")
+        frame_timer += dt
+        if frames and frame_timer > 0.15:
+            frame_timer = 0
+            frame_idx = (frame_idx + 1) % len(frames)
+
+        # --- draw ---
+        screen.fill((15, 56, 15))
+
+        if outside:
+            txt = big.render("KNIGHT IS", True, (155, 188, 15))
+            screen.blit(txt, txt.get_rect(center=(160, 100)))
+            txt2 = big.render("OUTSIDE", True, (155, 188, 15))
+            screen.blit(txt2, txt2.get_rect(center=(160, 130)))
+        else:
+            # draw sprite centered
+            if frames:
+                surf = frames[frame_idx % len(frames)]
+                screen.blit(surf, surf.get_rect(center=(160, 110)))
+
+            # draw bars
+            draw_bar(screen,  36,  8, state["hunger"],    (220, 100, 60),  "H", font)
+            draw_bar(screen,  36, 24, state["happiness"], (240, 220, 80),  "J", font)
+            draw_bar(screen,  36, 40, state["health"],    (80,  220, 100), "L", font)
+            draw_bar(screen,  36, 56, state["tiredness"], (120, 120, 200), "Z", font)
+
+            # controls hint
+            hint = font.render("F=feed P=play S=sleep", True, (100, 140, 100))
+            screen.blit(hint, (10, 220))
+
+            if state["health"] <= 0:
+                txt = big.render("GAME OVER", True, (200, 50, 50))
+                screen.blit(txt, txt.get_rect(center=(160, 120)))
+
+        pygame.display.flip()
+
+    pygame.quit()
 
 if __name__ == "__main__":
     main()
