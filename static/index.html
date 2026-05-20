@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Knight Tamagotchi</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body class="gb">
+  <main class="screen">
+    <h1 class="pixel">🛡️ KNIGHT</h1>
+
+    <div id="knight-art" class="knight-art">🧍‍♂️</div>
+
+    <div class="stats">
+      <div>Hunger    <progress id="hunger" max="100" value="0"></progress> <span id="hunger-v"></span></div>
+      <div>Happiness <progress id="happiness" max="100" value="0"></progress> <span id="happiness-v"></span></div>
+      <div>Health    <progress id="health" max="100" value="0"></progress> <span id="health-v"></span></div>
+      <div>Tiredness <progress id="tiredness" max="100" value="0"></progress> <span id="tiredness-v"></span></div>
+    </div>
+
+    <div id="banner" class="banner" hidden>🌲 Knight is outside on an adventure...</div>
+    <div id="food-banner" class="banner ok" hidden>🍖 Food waiting: <span id="food-pending">0</span></div>
+
+    <div class="actions">
+      <a class="btn" href="/play">⚔️ GO OUTSIDE</a>
+      <button class="btn" id="feed">🍖 FEED PENDING</button>
+    </div>
+
+    <p class="hint">Stats sync from your Raspberry Pi every 2 seconds.</p>
+  </main>
+
+<script>
+async function refresh() {
+  try {
+    const s = await fetch("/api/public/state").then(r => r.json());
+    for (const k of ["hunger","happiness","health","tiredness"]) {
+      document.getElementById(k).value = s[k];
+      document.getElementById(k+"-v").textContent = Math.round(s[k]);
+    }
+    document.getElementById("banner").hidden = !s.outside;
+    document.getElementById("food-banner").hidden = (s.food_pending|0) === 0;
+    document.getElementById("food-pending").textContent = s.food_pending;
+    document.getElementById("knight-art").textContent =
+      s.outside ? "🚶‍♂️" :
+      s.animation === "hurt" ? "😵" :
+      s.animation === "attack" ? "⚔️" :
+      s.animation === "jump" ? "🤸" :
+      s.animation === "run" ? "🏃" : "🧍‍♂️";
+  } catch (e) { console.error(e); }
+}
+document.getElementById("feed").onclick = async () => {
+  await fetch("/api/public/consume_food", { method: "POST" });
+  refresh();
+};
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "hunger": 50,
+  "happiness": 50,
+  "health": 100,
+  "tiredness": 30,
+  "animation": "idle",
+  "outside": false,
+  "food_pending": 8,
+  "updated_at": "2026-05-20T07:25:40.729570Z"
+}
